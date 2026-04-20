@@ -5,8 +5,6 @@ dist/
 build/
 .venv/
 venv/
-.env
-.env.local
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
@@ -15,4 +13,5 @@ htmlcov/
 *.swp
 .DS_Store
 .idea/
-.vscode/
+config.bat
+node_modules
