@@ -27,7 +27,7 @@ The wedge: FinOps that lives inside the loop your agent is already running, not 
 | Cloud      | Status   | Tools                                                                |
 |------------|----------|----------------------------------------------------------------------|
 | Azure      | ✅ v0.1  | `get_cost_summary`, `find_idle_resources`, `explain_cost_change`     |
-| AWS        | 🚧 next  | Cost Explorer + idle EBS / EIP / NAT                                 |
+| AWS        | ✅ v0.2  | `get_cost_summary`, `find_idle_resources`, `explain_cost_change`     |
 | GCP        | 🚧 next  | BigQuery billing export + idle compute                               |
 | Kubernetes | 🚧 next  | OpenCost-backed cost allocation + rightsizing                        |
 
@@ -42,15 +42,36 @@ uv pip install -e .      # or: pip install -e .
 
 ## Azure setup
 
-`finops-mcp` uses `DefaultAzureCredential`, so any of these just works:
+Uses `DefaultAzureCredential` — any of these works:
 
 - `az login` (easiest for local use)
 - Service principal via `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `AZURE_TENANT_ID`
 - Managed identity (Azure-hosted agents)
 
+Cross-tenant queries are transparent: pass any subscription ID and the
+server discovers the owning tenant via ARM's challenge flow and mints a
+token via `az ... --subscription`. No `az login --tenant X` dance needed,
+as long as `az account list` sees the subscription.
+
 Required roles on the target subscription:
 - **Cost Management Reader** (for cost queries)
 - **Reader** (for idle-resource enumeration)
+
+## AWS setup
+
+Uses boto3's default credential chain — any of these works:
+
+- `aws configure` (writes `~/.aws/credentials`)
+- Env vars: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (+ optional `AWS_SESSION_TOKEN`)
+- SSO: `aws sso login --profile <name>` then `AWS_PROFILE=<name>`
+- Instance / container IAM role (automatic on AWS-hosted runners)
+
+Required IAM permissions:
+- `ce:GetCostAndUsage` — cost tools (also requires Cost Explorer enabled in the Billing console)
+- `ec2:Describe*` — idle-resource scans
+
+Note: Cost Explorer bills **$0.01 per API call**. `explain_cost_change`
+makes 2 calls per invocation.
 
 ## Use with Claude Desktop / Claude Code
 
@@ -87,13 +108,12 @@ Scans for unattached managed disks, unassociated public IPs, orphaned NICs, and 
 
 ## Roadmap
 
-- **v0.2** — AWS provider (Cost Explorer, Compute Optimizer, idle EBS/EIP/NAT)
 - **v0.3** — GCP provider (BigQuery billing export, Recommender idle VM findings)
 - **v0.4** — Kubernetes via OpenCost (namespace cost, pod rightsizing, zombie workloads)
 - **v0.5** — Write tools (gated by `FINOPS_MCP_ALLOW_WRITES=1`):
   - `draft_terraform_remediation` — HCL to delete/downsize a finding
   - `draft_github_issue` — PR/issue with savings estimate
-- **v0.6** — Anomaly detection, commitment coverage, cross-cloud rollups
+- **v0.6** — AWS rightsizing via Compute Optimizer, Azure Advisor integration, anomaly detection, commitment coverage, cross-cloud rollups
 
 ## Design
 
@@ -102,11 +122,11 @@ Cross-cloud is the point. Every tool accepts a `cloud` parameter and dispatches 
 ```
 finops_mcp/
 ├── server.py            # MCP entrypoint, tool surface
-├── models.py            # CostSummary, Finding — cloud-agnostic
+├── models.py            # CostSummary, Finding, CostChangeExplanation
 └── providers/
     ├── base.py          # Provider protocol
     ├── azure/           # ✅ v0.1
-    ├── aws/             # 🚧 v0.2
+    ├── aws/             # ✅ v0.2
     └── gcp/             # 🚧 v0.3
 ```
 
