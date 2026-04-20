@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
+from datetime import date
 
-from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
+from azure.core.exceptions import (
+    ClientAuthenticationError,
+    HttpResponseError,
+    ResourceNotFoundError,
+)
 from azure.identity import (
     ChainedTokenCredential,
     EnvironmentCredential,
@@ -11,8 +16,8 @@ from azure.identity import (
 )
 
 from ...errors import FinOpsError
-from ...models import CostSummary, Finding
-from .cost import query_cost_summary
+from ...models import CostChangeExplanation, CostSummary, Finding
+from .cost import explain_cost_change_query, query_cost_summary
 from .credentials import AzureCliSubscriptionCredential
 from .idle import find_idle
 from .tenant import discover_subscription_tenant
@@ -90,6 +95,10 @@ class AzureProvider:
                     f"AZURE_TENANT_ID={tenant} for a service principal in that tenant."
                 ) from e
             raise FinOpsError(f"Azure authentication failed: {msg}") from e
+        except ResourceNotFoundError as e:
+            raise FinOpsError(
+                f"Azure subscription {sub} not found or not visible to the current identity."
+            ) from e
         except HttpResponseError as e:
             status = getattr(e, "status_code", None) or getattr(
                 getattr(e, "response", None), "status_code", None
@@ -121,3 +130,16 @@ class AzureProvider:
         cred = self._credential_for(scope)
         with self._friendly_errors(scope):
             return find_idle(cred, scope, kinds)
+
+    def explain_cost_change(
+        self,
+        scope: str,
+        target_date: date,
+        window_days: int,
+        top_n: int,
+    ) -> CostChangeExplanation:
+        cred = self._credential_for(scope)
+        with self._friendly_errors(scope):
+            return explain_cost_change_query(
+                cred, scope, target_date, window_days, top_n
+            )

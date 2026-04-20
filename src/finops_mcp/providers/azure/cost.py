@@ -11,7 +11,12 @@ from azure.mgmt.costmanagement.models import (
     QueryTimePeriod,
 )
 
-from ...models import CostPoint, CostSummary
+from ...models import (
+    CostChangeExplanation,
+    CostContributor,
+    CostPoint,
+    CostSummary,
+)
 
 _GROUP_BY_DIM = {
     "service": "ServiceName",
@@ -115,4 +120,120 @@ def query_cost_summary(
         currency=currency,
         total=round(total, 2),
         points=points,
+    )
+
+
+def query_service_costs(
+    credential, scope: str, start_date: date, end_date: date
+) -> tuple[dict[str, float], str]:
+    """Return ({service_name: cost}, currency) for the date range."""
+    client = CostManagementClient(credential)
+    start_dt = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+    end_dt = datetime.combine(end_date, time.max, tzinfo=timezone.utc)
+
+    query = QueryDefinition(
+        type="ActualCost",
+        timeframe="Custom",
+        time_period=QueryTimePeriod(from_property=start_dt, to=end_dt),
+        dataset=QueryDataset(
+            granularity="None",
+            aggregation={
+                "totalCost": QueryAggregation(name="Cost", function="Sum"),
+            },
+            grouping=[QueryGrouping(type="Dimension", name="ServiceName")],
+        ),
+    )
+    full_scope = _normalize_scope(scope)
+    result = client.query.usage(scope=full_scope, parameters=query)
+
+    col_index = {c.name.lower(): i for i, c in enumerate(result.columns or [])}
+    cost_i = col_index.get("cost") or col_index.get("pretaxcost")
+    currency_i = col_index.get("currency")
+    service_i = col_index.get("servicename")
+
+    out: dict[str, float] = {}
+    currency = "USD"
+    if cost_i is None:
+        return out, currency
+    for row in result.rows or []:
+        amount = float(row[cost_i])
+        service = str(row[service_i]) if service_i is not None else "unknown"
+        if currency_i is not None:
+            currency = str(row[currency_i])
+        out[service] = out.get(service, 0.0) + amount
+    return out, currency
+
+
+def explain_cost_change_query(
+    credential,
+    scope: str,
+    target_date: date,
+    window_days: int,
+    top_n: int,
+) -> CostChangeExplanation:
+    """Diff service-level spend for the `window_days` ending on target_date
+    vs. the immediately preceding equal-length window.
+    """
+    window_days = max(1, min(window_days, 90))
+    top_n = max(1, min(top_n, 50))
+
+    target_end = target_date
+    target_start = target_end - timedelta(days=window_days - 1)
+    baseline_end = target_start - timedelta(days=1)
+    baseline_start = baseline_end - timedelta(days=window_days - 1)
+
+    target, cur_t = query_service_costs(credential, scope, target_start, target_end)
+    baseline, cur_b = query_service_costs(
+        credential, scope, baseline_start, baseline_end
+    )
+    currency = cur_t or cur_b or "USD"
+
+    services = set(target) | set(baseline)
+    rows: list[tuple[str, float, float, float, float | None]] = []
+    for svc in services:
+        t = target.get(svc, 0.0)
+        b = baseline.get(svc, 0.0)
+        delta = t - b
+        delta_pct = (delta / b * 100.0) if b else None
+        rows.append((svc, b, t, delta, delta_pct))
+
+    baseline_total = sum(baseline.values())
+    target_total = sum(target.values())
+    total_delta = target_total - baseline_total
+    total_delta_pct = (
+        (total_delta / baseline_total * 100.0) if baseline_total else None
+    )
+
+    rows.sort(key=lambda r: abs(r[3]), reverse=True)
+    top = rows[:top_n]
+
+    contributors = [
+        CostContributor(
+            service=svc,
+            baseline=round(b, 2),
+            target=round(t, 2),
+            delta=round(delta, 2),
+            delta_pct=round(delta_pct, 1) if delta_pct is not None else None,
+            share_of_change=(
+                round(delta / total_delta, 3) if total_delta else 0.0
+            ),
+        )
+        for svc, b, t, delta, delta_pct in top
+    ]
+
+    return CostChangeExplanation(
+        cloud="azure",
+        scope=_normalize_scope(scope),
+        baseline_start=baseline_start,
+        baseline_end=baseline_end,
+        target_start=target_start,
+        target_end=target_end,
+        baseline_total=round(baseline_total, 2),
+        target_total=round(target_total, 2),
+        total_delta=round(total_delta, 2),
+        total_delta_pct=(
+            round(total_delta_pct, 1) if total_delta_pct is not None else None
+        ),
+        currency=currency,
+        top_contributors=contributors,
     )

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Protocol, runtime_checkable
 
-from ..models import CostSummary, Finding
+from ..models import CostChangeExplanation, CostSummary, Finding
 
 
 @runtime_checkable
@@ -22,3 +23,11 @@ class Provider(Protocol):
     def find_idle_resources(
         self, scope: str, kinds: list[str]
     ) -> list[Finding]: ...
+
+    def explain_cost_change(
+        self,
+        scope: str,
+        target_date: date,
+        window_days: int,
+        top_n: int,
+    ) -> CostChangeExplanation: ...

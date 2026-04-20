@@ -33,6 +33,30 @@ class CostSummary(BaseModel):
     points: list[CostPoint]
 
 
+class CostContributor(BaseModel):
+    service: str
+    baseline: float
+    target: float
+    delta: float
+    delta_pct: float | None = None
+    share_of_change: float
+
+
+class CostChangeExplanation(BaseModel):
+    cloud: Cloud
+    scope: str
+    baseline_start: date
+    baseline_end: date
+    target_start: date
+    target_end: date
+    baseline_total: float
+    target_total: float
+    total_delta: float
+    total_delta_pct: float | None = None
+    currency: str
+    top_contributors: list[CostContributor]
+
+
 class Finding(BaseModel):
     cloud: Cloud
     kind: str

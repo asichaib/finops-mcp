@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import logging
 import os
+from datetime import date, datetime, timedelta
 from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
 
-from .models import CostSummary, Finding
+from .models import CostChangeExplanation, CostSummary, Finding
 from .providers.azure.provider import AzureProvider
+
+# Azure SDK credential chains emit noisy warnings to stderr on each failed
+# link; our friendly-error wrapper already translates the final outcome.
+# Users can re-enable with FINOPS_MCP_VERBOSE=1.
+if not os.getenv("FINOPS_MCP_VERBOSE"):
+    for _name in ("azure", "azure.identity", "azure.core"):
+        logging.getLogger(_name).setLevel(logging.CRITICAL)
 
 mcp = FastMCP("finops-mcp")
 
@@ -55,6 +64,49 @@ def get_cost_summary(
     """
     full_scope = _resolve_scope(scope, cloud)
     return _provider(cloud).get_cost_summary(full_scope, days, group_by)
+
+
+def _parse_date(value: str) -> date:
+    v = value.strip().lower()
+    today = date.today()
+    if v in ("today", "now"):
+        return today
+    if v == "yesterday":
+        return today - timedelta(days=1)
+    try:
+        return datetime.strptime(v, "%Y-%m-%d").date()
+    except ValueError as e:
+        raise ValueError(
+            f"Unrecognized date '{value}'. Use YYYY-MM-DD, 'today', or 'yesterday'."
+        ) from e
+
+
+@mcp.tool()
+def explain_cost_change(
+    date: str,
+    scope: str | None = None,
+    window_days: int = 7,
+    top_n: int = 10,
+    cloud: Literal["azure"] = "azure",
+) -> CostChangeExplanation:
+    """Explain what drove a cloud spend change around a given date.
+
+    Compares actual spend by service in the `window_days`-day window ending
+    on `date` against the equivalent window immediately before. Returns
+    ranked service-level contributors to the change (increases and decreases),
+    their share of the total delta, and total change.
+
+    `date` accepts ISO `YYYY-MM-DD`, `today`, or `yesterday`.
+    `window_days` clamps to 1..90. `top_n` clamps to 1..50.
+
+    Example: "why did my Azure spend jump last Tuesday?"
+    → explain_cost_change(date="2026-04-14", window_days=7)
+    """
+    full_scope = _resolve_scope(scope, cloud)
+    target_date = _parse_date(date)
+    return _provider(cloud).explain_cost_change(
+        full_scope, target_date, window_days, top_n
+    )
 
 
 @mcp.tool()

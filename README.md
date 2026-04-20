@@ -24,12 +24,12 @@ The wedge: FinOps that lives inside the loop your agent is already running, not 
 
 ## Status
 
-| Cloud      | Status   | Tools                                              |
-|------------|----------|----------------------------------------------------|
-| Azure      | ✅ v0.1  | `get_cost_summary`, `find_idle_resources`          |
-| AWS        | 🚧 next  | Cost Explorer + idle EBS / EIP / NAT               |
-| GCP        | 🚧 next  | BigQuery billing export + idle compute             |
-| Kubernetes | 🚧 next  | OpenCost-backed cost allocation + rightsizing      |
+| Cloud      | Status   | Tools                                                                |
+|------------|----------|----------------------------------------------------------------------|
+| Azure      | ✅ v0.1  | `get_cost_summary`, `find_idle_resources`, `explain_cost_change`     |
+| AWS        | 🚧 next  | Cost Explorer + idle EBS / EIP / NAT                                 |
+| GCP        | 🚧 next  | BigQuery billing export + idle compute                               |
+| Kubernetes | 🚧 next  | OpenCost-backed cost allocation + rightsizing                        |
 
 ## Install
 
@@ -81,6 +81,9 @@ Actual spend over the last N days, grouped by service / resource group / locatio
 
 ### `find_idle_resources`
 Scans for unattached managed disks, unassociated public IPs, orphaned NICs, and snapshots older than 90 days. Returns findings with human-readable recommendations.
+
+### `explain_cost_change`
+"Why did spend jump on date X?" — diffs service-level cost in the window ending on `date` vs. the equivalent window immediately before. Returns ranked contributors (increases *and* decreases) with each one's share of the total delta. This is the tool your dashboard can't give you: one prompt, a diagnosis.
 
 ## Roadmap
 
